@@ -248,6 +248,7 @@ class FeatureGenerator:
 
         logger.info("Shifting targets with -1")
 
+        ## target
         filled_data["item_cnt_month"] = (
             filled_data.sort_values("date_block_num")
             .groupby(["shop_id", "item_id"])["item_cnt"]
@@ -309,6 +310,7 @@ class FeatureGenerator:
         latest_records = pd.concat([train_set, validation_set]).drop_duplicates(
             subset=["shop_id", "item_id"], keep="last"
         )
+
         X_test = pd.merge(
             test_data,
             latest_records,

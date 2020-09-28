@@ -8,7 +8,7 @@ We have been asked to predict total sales for every product and store in the nex
 
 ## Project structure
 
-.
+```
 ├── README.md
 ├── archives
 ├── checkpoints
@@ -47,6 +47,7 @@ We have been asked to predict total sales for every product and store in the nex
 │ └── meta.yaml
 ├── settings.py
 └── utils.py
+```
 
 ## Run the project
 

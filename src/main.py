@@ -56,6 +56,7 @@ def test_model(X_train, Y_train, X_validation, Y_validation, X_test, model):
         "validation_rmse",
         np.sqrt(mean_squared_error(Y_validation, validation_predictions)),
     )
+
     return test_predictions
 
 

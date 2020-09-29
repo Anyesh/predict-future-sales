@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import LabelEncoder
 
 from . import settings
 from .settings import logger
@@ -53,74 +54,112 @@ class FeatureGenerator:
             },
         )
 
-        logger.info("Joining items, shops and item_categories to sales")
+        # logger.info("Joining items, shops and item_categories to sales")
 
-        train_data = (
-            sales.join(items, on="item_id", rsuffix="_")
-            .join(shops, on="shop_id", rsuffix="_")
-            .join(item_categories, on="item_category_id", rsuffix="_")
-            .drop(["item_id_", "shop_id_", "item_category_id_"], axis=1)
-        )
+        # train_data = (
+        #     sales.join(items, on="item_id", rsuffix="_")
+        #     .join(shops, on="shop_id", rsuffix="_")
+        #     .join(item_categories, on="item_category_id", rsuffix="_")
+        #     .drop(["item_id_", "shop_id_", "item_category_id_"], axis=1)
+        # )
 
-        return train_data, test_data
+        return sales, items, shops, item_categories, test_data
 
-    def clean_data(self, train_data, test_data):
+    def clean_data(self, sales, items, shops, item_categories, test):
         logger.info("Start data cleaning")
 
-        train_data = train_data[
-            (train_data["item_price"] > 0 & train_data["item_price"] < 100000)
-            & (train_data["item_cnt_day"] > 0 & train_data["item_cnt_day"] < 1001)
+        sales["date"] = pd.to_datetime(sales["date"], format="%Y %m %d")
+        sales["month"] = sales["date"].dt.month
+        sales["year"] = sales["date"].dt.year
+
+        sales = sales.drop("date", axis=1)
+        sales = sales.drop("item_price", axis=1)
+
+        temp = sales.groupby(
+            [x for x in sales.columns if x not in ["item_cnt_day"]], as_index=False
+        )["item_cnt_day"].sum()
+        temp.columns = [
+            "date_block_num",
+            "shop_id",
+            "item_id",
+            "month",
+            "year",
+            "item_cnt_month",
         ]
+
+        shop_item_mean = (
+            temp[["shop_id", "item_id", "item_cnt_month"]]
+            .groupby(["shop_id", "item_id"], as_index=False)["item_cnt_month"]
+            .mean()
+        )
+        shop_item_mean.columns = ["shop_id", "item_id", "item_cnt_mean"]
+
+        train = pd.merge(temp, shop_item_mean, how="left", on=["shop_id", "item_id"])
+
+        shop_pre_month = train[train["date_block_num"] == 33][
+            ["shop_id", "item_id", "item_cnt_month"]
+        ]
+        shop_pre_month.columns = ["shop_id", "item_id", "item_cnt_prev_month"]
+
+        train = pd.merge(
+            train, shop_pre_month, how="left", on=["shop_id", "item_id"]
+        ).fillna(0)
+        train = pd.merge(train, items, how="left", on=["item_id"])
+        train = pd.merge(train, item_categories, how="left", on=["item_category_id"])
+        train = pd.merge(train, shops, how="left", on=["shop_id"])
+        train = train.drop_duplicates(subset=["shop_id", "item_id"], keep="last")
+
+        test["month"] = 11
+        test["year"] = 2015
+        test["date_block_num"] = 34
+
+        test = pd.merge(
+            test, shop_item_mean, how="left", on=["shop_id", "item_id"]
+        ).fillna(0)
+        test = pd.merge(
+            test, shop_pre_month, how="left", on=["shop_id", "item_id"]
+        ).fillna(0)
+        test = pd.merge(test, items, how="left", on=["item_id"]).fillna(0)
+        test = pd.merge(
+            test, item_categories, how="left", on=["item_category_id"]
+        ).fillna(0)
+        test = pd.merge(test, shops, how="left", on=["shop_id"]).fillna(0)
+        test["item_cnt_month"] = 0
+        test = test.drop_duplicates(subset=["shop_id", "item_id"], keep="last")
+
+        for item in ["shop_name", "item_name", "item_category_name"]:
+            lbl = LabelEncoder()
+            lbl.fit(list(train[item].unique()) + list(test[item].unique()))
+            train[item] = lbl.transform(train[item].astype(str))
+            test[item] = lbl.transform(test[item].astype(str))
 
         logger.info("End data cleaning")
 
-        return train_data
-
-    def fill_data(self, monthly_data):
-
-        logger.info("Start data filling")
-
-        shop_ids = monthly_data["shop_id"].unique()
-        item_ids = monthly_data["item_id"].unique()
-
-        empty_df = []
-        for i in range(34):  # upto 33
-            for shop in shop_ids:
-                for item in item_ids:
-                    empty_df.append([i, shop, item])
-
-        empty_df = pd.DataFrame(
-            empty_df, columns=["date_block_num", "shop_id", "item_id"]
-        )
-        monthly_data = pd.merge(
-            empty_df,
-            monthly_data,
-            on=["date_block_num", "shop_id", "item_id"],
-            how="left",
-        )
-        monthly_data.fillna(0, inplace=True)
-        logger.info("End data filling")
-
-        return monthly_data
+        return train, test
 
     def generate(self):
         logger.info("Start feature generator")
 
-        train_data, test_data = self.get_datasets()
-        clean_data = self.clean_data(train_data, test_data)
-        filled_data = self.fill_data(clean_data)
-        filled_data["year"] = filled_data["date_block_num"].apply(
-            lambda x: ((x // 12) + 2013)
-        )
-        filled_data["month"] = filled_data["date_block_num"].apply(lambda x: (x % 12))
+        sales, items, shops, item_categories, test_data = self.get_datasets()
+        train, test = self.clean_data(sales, items, shops, item_categories, test_data)
+
+        col = [c for c in train.columns if c not in ["item_cnt_month"]]
+        train_data = train[train["date_block_num"] < 33]
+        train_y = np.log1p(train_data["item_cnt_month"].clip(0, 20))
+        train_data = train_data[col]
+
+        val_data = train[train["date_block_num"] == 33]
+        val_y = np.log1p(val_data["item_cnt_month"].clip(0, 20))
+        val_data = val_data[col]
 
         ## PENDONG
 
-        return X_train, Y_train, X_validation, Y_validation, X_test
+        return train_data, train_y, val_data, val_y, test, col
 
 
 if __name__ == "__main__":
 
     fg = FeatureGenerator()
-    X_train, Y_train, X_validation, Y_validation, X_test = fg.generate()
+    train_data, train_y, val_data, val_y, test, cols = fg.generate()
+    print(train_data.drop_duplicates())
     # logger.info(monthly_data.head())

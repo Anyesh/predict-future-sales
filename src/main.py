@@ -30,7 +30,7 @@ def train_model(X_train, Y_train, X_validation, Y_validation, X_test, model_name
     model.fit(
         X_train,
         Y_train,
-        eval_set=[(X_validation, Y_validation)],
+        # eval_set=[(X_validation, Y_validation)],
         **model_params[model_name],
     )
 
@@ -54,19 +54,22 @@ def test_model(X_train, Y_train, X_validation, Y_validation, X_test, model):
 
 
 if __name__ == "__main__":
-    MODEL_NAME = "xgboost"
-    TRAIN_MODEL = False
+    MODEL_NAME = "randomforest"
+    TRAIN_MODEL = True
+    IGNORE_CHECKPOINT = True
 
     fg = FeatureGenerator()
 
-    if no_files(CHK_PATH, ["frozen_data.npz"]):
-        X_train, Y_train, X_validation, Y_validation, X_test = fg.generate()
+    if no_files(CHK_PATH, ["frozen_data.npz"]) or IGNORE_CHECKPOINT:
+        X_train, Y_train, X_validation, Y_validation, test_data, cols = fg.generate()
+        logger.info(f"Final data columns {cols}")
+
         X_train, Y_train, X_validation, Y_validation, X_test = (
             X_train.values,
             Y_train.values,
             X_validation.values,
             Y_validation.values,
-            X_test.values,
+            test_data[cols].values,
         )
         np.savez(
             os.path.join(CHK_PATH, "frozen_data.npz"),
@@ -107,9 +110,10 @@ if __name__ == "__main__":
     test_predictions = test_model(
         X_train, Y_train, X_validation, Y_validation, X_test, model
     )
-    _, test_data = fg.get_datasets()
+
     prediction_df = pd.DataFrame(test_data["ID"], columns=["ID"])
     prediction_df["item_cnt_month"] = test_predictions.clip(0.0, 20.0)
-    prediction_df.to_csv(
-        uniquify(os.path.join(OUTPUT_PATH, f"{MODEL_NAME}_submission.csv")), index=False
-    )
+
+    pred_file_name = uniquify(os.path.join(OUTPUT_PATH, f"{MODEL_NAME}_submission.csv"))
+    mlflow.log_param("file_name", pred_file_name)
+    prediction_df.to_csv(pred_file_name, index=False)

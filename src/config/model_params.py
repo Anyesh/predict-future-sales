@@ -10,7 +10,12 @@ core_parameters = {
         "gpu_id": 0,
     },
     "linear_regression": {},
-    "extratrees": {},
+    "extratrees": {
+        "n_estimators": 25,
+        "n_jobs": -1,
+        "max_depth": 20,
+        "random_state": 0,
+    },
     "randomforest": {
         "n_estimators": 50,
         "max_depth": 7,
@@ -22,8 +27,10 @@ core_parameters = {
 model_params = {
     "xgboost": {
         "verbose": 0,
-        "early_stopping_rounds": 20,
-        "eval_metric": "rmse",
+        # "early_stopping_rounds": 20,
+        # "eval_metric": "rmse",
     },
     "randomforest": {},
+    "extratrees": {},
+    "linear_regression": {},
 }

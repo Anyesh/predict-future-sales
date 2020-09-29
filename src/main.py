@@ -56,7 +56,7 @@ def test_model(X_train, Y_train, X_validation, Y_validation, X_test, model):
 if __name__ == "__main__":
     MODEL_NAME = "randomforest"
     TRAIN_MODEL = True
-    IGNORE_CHECKPOINT = True
+    IGNORE_CHECKPOINT = False
 
     fg = FeatureGenerator()
 
@@ -71,6 +71,7 @@ if __name__ == "__main__":
             Y_validation.values,
             test_data[cols].values,
         )
+        index = test_data.index
         np.savez(
             os.path.join(CHK_PATH, "frozen_data.npz"),
             X_train=X_train,
@@ -78,16 +79,18 @@ if __name__ == "__main__":
             X_validation=X_validation,
             Y_validation=Y_validation,
             X_test=X_test,
+            index=index,
         )
     else:
         logger.info("Loading data from checkpoint")
         _ = np.load(os.path.join(CHK_PATH, "frozen_data.npz"))
-        X_train, Y_train, X_validation, Y_validation, X_test = (
+        X_train, Y_train, X_validation, Y_validation, X_test, index = (
             _["X_train"],
             _["Y_train"],
             _["X_validation"],
             _["Y_validation"],
             _["X_test"],
+            _["index"],
         )
 
     Path(os.path.join(CHK_PATH, MODEL_NAME)).mkdir(parents=True, exist_ok=True)
@@ -111,7 +114,7 @@ if __name__ == "__main__":
         X_train, Y_train, X_validation, Y_validation, X_test, model
     )
 
-    prediction_df = pd.DataFrame(test_data["ID"], columns=["ID"])
+    prediction_df = pd.DataFrame(index, columns=["ID"])
     prediction_df["item_cnt_month"] = test_predictions.clip(0.0, 20.0)
 
     pred_file_name = uniquify(os.path.join(OUTPUT_PATH, f"{MODEL_NAME}_submission.csv"))

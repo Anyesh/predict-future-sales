@@ -1,8 +1,10 @@
 import os
+from itertools import product
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
+from tqdm import tqdm
 
 from . import settings
 from .settings import logger
@@ -68,74 +70,135 @@ class FeatureGenerator:
     def clean_data(self, sales, items, shops, item_categories, test):
         logger.info("Start data cleaning")
 
-        sales["date"] = pd.to_datetime(sales["date"], format="%Y %m %d")
-        sales["month"] = sales["date"].dt.month
-        sales["year"] = sales["date"].dt.year
+        sales_items = pd.merge(sales, items, on="item_id", how="left")
+        sales_items = sales_items.drop("item_name", axis=1)
 
-        sales = sales.drop("date", axis=1)
-        sales = sales.drop("item_price", axis=1)
+        index_cols = ["shop_id", "item_id", "date_block_num"]
 
-        temp = sales.groupby(
-            [x for x in sales.columns if x not in ["item_cnt_day"]], as_index=False
-        )["item_cnt_day"].sum()
-        temp.columns = [
-            "date_block_num",
-            "shop_id",
-            "item_id",
-            "month",
-            "year",
-            "item_cnt_month",
-        ]
-
-        shop_item_mean = (
-            temp[["shop_id", "item_id", "item_cnt_month"]]
-            .groupby(["shop_id", "item_id"], as_index=False)["item_cnt_month"]
-            .mean()
+        data_grid = []
+        for block_num in sales_items["date_block_num"].unique():
+            cur_shops = sales_items.loc[
+                sales_items["date_block_num"] == block_num, "shop_id"
+            ].unique()
+            cur_items = sales_items.loc[
+                sales_items["date_block_num"] == block_num, "item_id"
+            ].unique()
+            data_grid.append(
+                np.array(
+                    list(product(*[cur_shops, cur_items, [block_num]])), dtype="int32"
+                )
+            )
+        data_grid = pd.DataFrame(
+            np.vstack(data_grid), columns=index_cols, dtype=np.int32
         )
-        shop_item_mean.columns = ["shop_id", "item_id", "item_cnt_mean"]
 
-        train = pd.merge(temp, shop_item_mean, how="left", on=["shop_id", "item_id"])
+        mean_sales = (
+            sales_items.groupby(["date_block_num", "shop_id", "item_id"])
+            .agg({"item_cnt_day": "sum", "item_price": np.mean})
+            .reset_index()
+        )
+        mean_sales = pd.merge(
+            data_grid,
+            mean_sales,
+            on=["date_block_num", "shop_id", "item_id"],
+            how="left",
+        ).fillna(0)
 
-        shop_pre_month = train[train["date_block_num"] == 33][
-            ["shop_id", "item_id", "item_cnt_month"]
+        mean_sales = pd.merge(mean_sales, items, on="item_id", how="left")
+
+        ## Indiv encoding
+        for type_id in ["item_id", "shop_id", "item_category_id"]:
+            for column_id, aggregator, aggtype in [
+                ("item_price", np.mean, "avg"),
+                ("item_cnt_day", np.sum, "sum"),
+                ("item_cnt_day", np.mean, "avg"),
+            ]:
+
+                mean_df = (
+                    sales_items.groupby([type_id, "date_block_num"])
+                    .aggregate(aggregator)
+                    .reset_index()[[column_id, type_id, "date_block_num"]]
+                )
+                mean_df.columns = [
+                    type_id + "_" + aggtype + "_" + column_id,
+                    type_id,
+                    "date_block_num",
+                ]
+                mean_sales = pd.merge(
+                    mean_sales, mean_df, on=["date_block_num", type_id], how="left"
+                )
+
+        lag_variables = list(mean_sales.columns[7:]) + ["item_cnt_day"]
+
+        lags = [1, 2, 3, 6]  # lag values
+
+        for lag in tqdm(lags):
+
+            sales_new_df = mean_sales.copy()
+            sales_new_df.date_block_num += lag
+            sales_new_df = sales_new_df[
+                ["date_block_num", "shop_id", "item_id"] + lag_variables
+            ]
+            sales_new_df.columns = ["date_block_num", "shop_id", "item_id"] + [
+                lag_feat + "_lag_" + str(lag) for lag_feat in lag_variables
+            ]
+            mean_sales = pd.merge(
+                mean_sales,
+                sales_new_df,
+                on=["date_block_num", "shop_id", "item_id"],
+                how="left",
+            )
+
+        ## using 2015 data
+        mean_sales = mean_sales[mean_sales["date_block_num"] > 12]
+
+        ## filling missing values
+        for feat in mean_sales.columns:
+            if "item_cnt" in feat:
+                mean_sales[feat] = mean_sales[feat].fillna(0)
+            elif "item_price" in feat:
+                mean_sales[feat] = mean_sales[feat].fillna(mean_sales[feat].median())
+
+        cols_to_drop = [x for x in lag_variables if x not in ["item_cnt_day"]] + [
+            "item_price",
+            "item_name",
         ]
-        shop_pre_month.columns = ["shop_id", "item_id", "item_cnt_prev_month"]
 
-        train = pd.merge(
-            train, shop_pre_month, how="left", on=["shop_id", "item_id"]
-        ).fillna(0)
-        train = pd.merge(train, items, how="left", on=["item_id"])
-        train = pd.merge(train, item_categories, how="left", on=["item_category_id"])
-        train = pd.merge(train, shops, how="left", on=["shop_id"])
-        train = train.drop_duplicates(subset=["shop_id", "item_id"], keep="last")
+        train_data = mean_sales.drop(cols_to_drop, axis=1)
 
-        test["month"] = 11
-        test["year"] = 2015
+        ## test setup
         test["date_block_num"] = 34
+        test = pd.merge(test, items, on="item_id", how="left")
 
-        test = pd.merge(
-            test, shop_item_mean, how="left", on=["shop_id", "item_id"]
-        ).fillna(0)
-        test = pd.merge(
-            test, shop_pre_month, how="left", on=["shop_id", "item_id"]
-        ).fillna(0)
-        test = pd.merge(test, items, how="left", on=["item_id"]).fillna(0)
-        test = pd.merge(
-            test, item_categories, how="left", on=["item_category_id"]
-        ).fillna(0)
-        test = pd.merge(test, shops, how="left", on=["shop_id"]).fillna(0)
-        test["item_cnt_month"] = 0
-        test = test.drop_duplicates(subset=["shop_id", "item_id"], keep="last")
+        for lag in tqdm(lags):
 
-        for item in ["shop_name", "item_name", "item_category_name"]:
-            lbl = LabelEncoder()
-            lbl.fit(list(train[item].unique()) + list(test[item].unique()))
-            train[item] = lbl.transform(train[item].astype(str))
-            test[item] = lbl.transform(test[item].astype(str))
+            sales_new_df = mean_sales.copy()
+            sales_new_df.date_block_num += lag
+            sales_new_df = sales_new_df[
+                ["date_block_num", "shop_id", "item_id"] + lag_variables
+            ]
+            sales_new_df.columns = ["date_block_num", "shop_id", "item_id"] + [
+                lag_feat + "_lag_" + str(lag) for lag_feat in lag_variables
+            ]
+            test = pd.merge(
+                test,
+                sales_new_df,
+                on=["date_block_num", "shop_id", "item_id"],
+                how="left",
+            )
+        ## TODO: add Assertion for uniform cols
+
+        test = test.drop(["ID", "item_name"], axis=1)
+
+        for feat in test.columns:
+            if "item_cnt" in feat:
+                test[feat] = test[feat].fillna(0)
+            elif "item_price" in feat:
+                test[feat] = test[feat].fillna(test[feat].median())
 
         logger.info("End data cleaning")
 
-        return train, test
+        return train_data, test
 
     def generate(self):
         logger.info("Start feature generator")
@@ -143,16 +206,14 @@ class FeatureGenerator:
         sales, items, shops, item_categories, test_data = self.get_datasets()
         train, test = self.clean_data(sales, items, shops, item_categories, test_data)
 
-        col = [c for c in train.columns if c not in ["item_cnt_month"]]
+        col = [c for c in train.columns if c not in ["item_cnt_day"]]
         train_data = train[train["date_block_num"] < 33]
-        train_y = np.log1p(train_data["item_cnt_month"].clip(0, 20))
+        train_y = np.log1p(train_data["item_cnt_day"].clip(0, 20))
         train_data = train_data[col]
 
         val_data = train[train["date_block_num"] == 33]
-        val_y = np.log1p(val_data["item_cnt_month"].clip(0, 20))
+        val_y = np.log1p(val_data["item_cnt_day"].clip(0, 20))
         val_data = val_data[col]
-
-        ## PENDONG
 
         return train_data, train_y, val_data, val_y, test, col
 

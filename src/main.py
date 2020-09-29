@@ -9,11 +9,11 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error
 
-from .config.model_params import core_parameters
+from .config.model_params import core_parameters, model_params
 from .dispatcher import MODELS
 from .feature_generator import FeatureGenerator
 from .settings import CHK_PATH, OUTPUT_PATH, logger
-from .utils import no_files, uniquify
+from .utils import get_latest_file, no_files, uniquify
 
 warnings.filterwarnings("ignore")
 
@@ -30,9 +30,7 @@ def train_model(X_train, Y_train, X_validation, Y_validation, X_test, model_name
         X_train,
         Y_train,
         eval_set=[(X_validation, Y_validation)],
-        verbose=0,
-        early_stopping_rounds=2,
-        eval_metric="rmse",
+        **model_params[model_name],
     )
 
     return model
@@ -43,26 +41,22 @@ def test_model(X_train, Y_train, X_validation, Y_validation, X_test, model):
     validation_predictions = model.predict(X_validation)
     test_predictions = model.predict(X_test)
 
-    logger.info(
-        f"Train rmse: {np.sqrt(mean_squared_error(Y_train, train_predictions))}"
-    )
-    mlflow.log_metric(
-        "train_rmse", np.sqrt(mean_squared_error(Y_train, train_predictions))
-    )
-    logger.info(
-        f"Validation rmse: {np.sqrt(mean_squared_error(Y_validation, validation_predictions))}"
-    )
-    mlflow.log_metric(
-        "validation_rmse",
-        np.sqrt(mean_squared_error(Y_validation, validation_predictions)),
-    )
+    train_rmse = np.sqrt(mean_squared_error(Y_train, train_predictions))
+    val_rmse = np.sqrt(mean_squared_error(Y_validation, validation_predictions))
+
+    logger.info(f"Train rmse: {train_rmse}")
+    mlflow.log_metric("train_rmse", train_rmse)
+    logger.info(f"Validation rmse: {val_rmse}")
+    mlflow.log_metric("validation_rmse", val_rmse)
 
     return test_predictions
 
 
 if __name__ == "__main__":
+    MODEL_NAME = "xgboost"
+    TRAIN_MODEL = False
+
     fg = FeatureGenerator()
-    model_name = "xgboost"
 
     if no_files(CHK_PATH, ["frozen_data.npz"]):
         X_train, Y_train, X_validation, Y_validation, X_test = fg.generate()
@@ -83,24 +77,31 @@ if __name__ == "__main__":
         )
     else:
         logger.info("Loading data from checkpoint")
-        _data = np.load(os.path.join(CHK_PATH, "frozen_data.npz"))
+        _ = np.load(os.path.join(CHK_PATH, "frozen_data.npz"))
         X_train, Y_train, X_validation, Y_validation, X_test = (
-            _data["X_train"],
-            _data["Y_train"],
-            _data["X_validation"],
-            _data["Y_validation"],
-            _data["X_test"],
+            _["X_train"],
+            _["Y_train"],
+            _["X_validation"],
+            _["Y_validation"],
+            _["X_test"],
         )
 
-    if no_files(os.path.join(CHK_PATH, model_name, "model.pkl")):
-        Path(os.path.join(CHK_PATH, model_name)).mkdir(parents=True, exist_ok=True)
+    Path(os.path.join(CHK_PATH, MODEL_NAME)).mkdir(parents=True, exist_ok=True)
+    if no_files(os.path.join(CHK_PATH, MODEL_NAME), ["model.pkl"]) or TRAIN_MODEL:
+        logger.info(f"{MODEL_NAME} model training started")
 
         model = train_model(
-            X_train, Y_train, X_validation, Y_validation, X_test, model_name=model_name
+            X_train, Y_train, X_validation, Y_validation, X_test, model_name=MODEL_NAME
         )
-        joblib.dump(model, uniquify(os.path.join(CHK_PATH, model_name, "model.pkl")))
+
+        joblib.dump(model, uniquify(os.path.join(CHK_PATH, MODEL_NAME, "model.pkl")))
     else:
-        model = joblib.load(os.path.join(CHK_PATH, model_name, "model.pkl"))
+        latest_model = get_latest_file(os.path.join(CHK_PATH, MODEL_NAME), "*.pkl")
+        logger.info(f"Using latest {MODEL_NAME} model: {str(latest_model)}")
+
+        model = joblib.load(latest_model)
+
+    logger.info(str(model))
 
     test_predictions = test_model(
         X_train, Y_train, X_validation, Y_validation, X_test, model
@@ -109,5 +110,5 @@ if __name__ == "__main__":
     prediction_df = pd.DataFrame(test_data["ID"], columns=["ID"])
     prediction_df["item_cnt_month"] = test_predictions.clip(0.0, 20.0)
     prediction_df.to_csv(
-        uniquify(os.path.join(OUTPUT_PATH, f"{model_name}_submission.csv")), index=False
+        uniquify(os.path.join(OUTPUT_PATH, f"{MODEL_NAME}_submission.csv")), index=False
     )

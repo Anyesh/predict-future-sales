@@ -107,6 +107,7 @@ class FeatureGenerator:
         train = pd.merge(train, items, how="left", on=["item_id"])
         train = pd.merge(train, item_categories, how="left", on=["item_category_id"])
         train = pd.merge(train, shops, how="left", on=["shop_id"])
+        train = train.drop_duplicates(subset=["shop_id", "item_id"], keep="last")
 
         test["month"] = 11
         test["year"] = 2015
@@ -124,6 +125,7 @@ class FeatureGenerator:
         ).fillna(0)
         test = pd.merge(test, shops, how="left", on=["shop_id"]).fillna(0)
         test["item_cnt_month"] = 0
+        test = test.drop_duplicates(subset=["shop_id", "item_id"], keep="last")
 
         for item in ["shop_name", "item_name", "item_category_name"]:
             lbl = LabelEncoder()
@@ -158,6 +160,6 @@ class FeatureGenerator:
 if __name__ == "__main__":
 
     fg = FeatureGenerator()
-    train_data, train_y, val_data, val_y, test = fg.generate()
-    print(train_data.head())
+    train_data, train_y, val_data, val_y, test, cols = fg.generate()
+    print(train_data.drop_duplicates())
     # logger.info(monthly_data.head())

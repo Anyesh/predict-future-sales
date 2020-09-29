@@ -25,6 +25,7 @@ def train_model(X_train, Y_train, X_validation, Y_validation, X_test, model_name
     )
 
     mlflow.log_params(core_parameters[model_name])
+    mlflow.log_param("model_name", model_name)
 
     model.fit(
         X_train,

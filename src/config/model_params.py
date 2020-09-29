@@ -8,5 +8,22 @@ core_parameters = {
         "eta": 0.3,
         "seed": 0,
         "gpu_id": 0,
-    }
+    },
+    "linear_regression": {},
+    "extratrees": {},
+    "randomforest": {
+        "n_estimators": 50,
+        "max_depth": 7,
+        "random_state": 0,
+        "n_jobs": -1,
+    },
+}
+
+model_params = {
+    "xgboost": {
+        "verbose": 0,
+        "early_stopping_rounds": 20,
+        "eval_metric": "rmse",
+    },
+    "randomforest": {},
 }

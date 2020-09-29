@@ -25,6 +25,7 @@ def train_model(X_train, Y_train, X_validation, Y_validation, X_test, model_name
     )
 
     mlflow.log_params(core_parameters[model_name])
+    mlflow.log_param("model_name", model_name)
 
     model.fit(
         X_train,
@@ -53,7 +54,7 @@ def test_model(X_train, Y_train, X_validation, Y_validation, X_test, model):
 
 
 if __name__ == "__main__":
-    MODEL_NAME = "linear_regression"
+    MODEL_NAME = "randomforest"
     TRAIN_MODEL = True
     IGNORE_CHECKPOINT = True
 
@@ -112,6 +113,7 @@ if __name__ == "__main__":
 
     prediction_df = pd.DataFrame(test_data["ID"], columns=["ID"])
     prediction_df["item_cnt_month"] = test_predictions.clip(0.0, 20.0)
-    prediction_df.to_csv(
-        uniquify(os.path.join(OUTPUT_PATH, f"{MODEL_NAME}_submission.csv")), index=False
-    )
+
+    pred_file_name = uniquify(os.path.join(OUTPUT_PATH, f"{MODEL_NAME}_submission.csv"))
+    mlflow.log_param("file_name", pred_file_name)
+    prediction_df.to_csv(pred_file_name, index=False)

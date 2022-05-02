@@ -18,9 +18,7 @@ class FeatureGenerator:
     def download_data(self):
         if no_files(settings.DATA_DIR, settings.DATA_NAMES):
             for name in settings.DATA_NAMES:
-                _ = download_data(
-                    str(settings.DATA_URL) + "/" + str(name), settings.DATA_DIR
-                )
+                _ = download_data(f"{str(settings.DATA_URL)}/{str(name)}", settings.DATA_DIR)
         logger.info(f"Using {' '.join(settings.DATA_NAMES)} data files")
 
     def __call__(self):

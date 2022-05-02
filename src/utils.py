@@ -17,8 +17,7 @@ class DownloadProgressBar(tqdm):
 
 def no_files(path, file_list=[]):
     file_exist = [f for f in file_list if os.path.isfile(os.path.join(path, f))]
-    non_exist = list(set(file_exist) ^ set(file_list))
-    return non_exist
+    return list(set(file_exist) ^ set(file_list))
 
 
 def download_data(url, output_path):
@@ -50,5 +49,4 @@ def uniquify(path, sep=""):
 
 def get_latest_file(dir_path, file_type="*"):
     list_of_files = glob.glob(os.path.join(dir_path, file_type))
-    latest_file = max(list_of_files, key=os.path.getctime)
-    return latest_file
+    return max(list_of_files, key=os.path.getctime)
